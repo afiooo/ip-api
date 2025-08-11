@@ -1,14 +1,12 @@
 /**
- * functions/index.js - 最终优化版
+ * functions/index.js - 终极正确版
  *
- * 特点:
- * 1. 【高可用】放弃硬编码IP，改用高稳定性的专用API (icanhazip.com)，无需日后维护。
- * 2. 【使用简单】直接访问 ipv4.子域名 或 ipv6.子域名 即可获得包含IP和地理位置的完整JSON信息，无需 /geo 后缀。
- * 3. 【智能容错】当用户的网络不支持IPv6时，访问ipv6.子域名会返回清晰的提示。
- * 4. 【功能完整】保留根域名欢迎页和完整的CORS跨域支持。
+ * 核心逻辑:
+ * 1. 唯一且最可靠的IP来源是 Cloudflare 注入的 'cf-connecting-ip' 请求头。
+ * 2. 代码不再依赖任何外部 fetch 调用，杜绝了返回服务器自身IP的错误，稳定且高效。
+ * 3. 根据用户访问的子域名 (ipv4/ipv6) 和其真实IP类型进行匹配，返回正确的信息或清晰的提示。
+ * 4. 根域名返回 404 Not Found，仅子域名有效，满足您的最新要求。
  */
-
-// --- 配置区 ---
 
 // CORS 头部，允许跨域请求
 const CORS_HEADERS = {
@@ -17,18 +15,10 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
-// 稳定、无需维护的外部IP查询服务
-const IP_SERVICE_CONFIG = {
-  ipv4: { url: 'https://ipv4.icanhazip.com' },
-  ipv6: { url: 'https://ipv6.icanhazip.com' }
-};
-
-// --- 主函数 ---
-
 export async function onRequest(context) {
   const { request } = context;
 
-  // 处理 OPTIONS 预检请求，用于CORS
+  // 处理 OPTIONS 预检请求
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: CORS_HEADERS });
   }
@@ -36,56 +26,36 @@ export async function onRequest(context) {
   const url = new URL(request.url);
   const hostname = url.hostname;
 
-  // 1. 判断用户意图：查 v4，还是 v6，还是访问根域名
-  const ipType = hostname.startsWith('ipv4.') ? 'ipv4' : (hostname.startsWith('ipv6.') ? 'ipv6' : 'unknown');
+  // 从请求头中获取最真实的用户IP
+  const userIp = request.headers.get('cf-connecting-ip');
 
-  // 如果访问根域名 (e.g., 4444567.xyz)
-  if (ipType === 'unknown') {
-    const displayDomain = hostname.replace(/^(www\.)/, '');
-    const helpText = `欢迎使用 IP 及地理位置查询 API!
+  // 判断用户期望查询的IP类型
+  const requestedType = hostname.startsWith('ipv4.') ? 'ipv4' : (hostname.startsWith('ipv6.') ? 'ipv6' : 'unknown');
 
-使用方法 (返回JSON格式数据):
-- 查询您的公网 IPv4 地址及归属地:
-  https://ipv4.${displayDomain}
-
-- 查询您的公网 IPv6 地址及归属地:
-  https://ipv6.${displayDomain}
-`;
-    return new Response(helpText, {
-      status: 200,
-      headers: { ...CORS_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' }
-    });
+  // 如果访问根域名或其他未知域名，直接返回 404 Not Found
+  if (requestedType === 'unknown' || !userIp) {
+    return new Response('Not Found', { status: 404 });
   }
 
-  // 2. 如果是查询 IP (ipv4.* 或 ipv6.*)，直接返回包含地理位置的完整信息
-  let clientIp = '';
-  try {
-    const service = IP_SERVICE_CONFIG[ipType];
-    // 这个 fetch 会被 Cloudflare Worker 强制通过对应的协议栈发出
-    const response = await fetch(service.url, {
-        headers: {
-            'User-Agent': 'Cloudflare-Worker-IP-API/2.0'
-        }
-    });
+  // 判断用户真实IP的类型 (简单通过 : 和 . 来区分)
+  const actualIpType = userIp.includes(':') ? 'ipv6' : 'ipv4';
 
-    if (!response.ok) {
-        throw new Error(`External service ${service.url} failed with status ${response.status}`);
+  let displayIp;
+
+  // 核心判断逻辑
+  if (requestedType === actualIpType) {
+    // 用户的期望和实际情况一致，直接显示IP
+    displayIp = userIp;
+  } else {
+    // 用户的期望和实际情况不符
+    if (requestedType === 'ipv4') {
+      displayIp = `查询失败：您当前正通过 IPv6 (${userIp}) 连接，因此无法显示您的 IPv4 地址。`;
+    } else { // requestedType === 'ipv6'
+      displayIp = `查询失败：您当前正通过 IPv4 (${userIp}) 连接，您的网络似乎不支持 IPv6。`;
     }
-    clientIp = (await response.text()).trim();
-
-  } catch (error) {
-    console.error(`Error fetching external ${ipType} IP:`, error);
-    // 捕获到错误，很可能是因为用户的网络环境不支持。例如，在纯IPv4网络下查询IPv6地址。
-    const friendlyError = (ipType === 'ipv6')
-      ? '无法查询到您的 IPv6 地址。您的网络当前可能不支持 IPv6 协议。'
-      : `无法查询到您的 ${ipType.toUpperCase()} 地址，请稍后重试。`;
-    
-    // 依然返回JSON结构，但IP字段为错误信息
-    clientIp = friendlyError;
   }
 
-  // 3. 提取 Cloudflare 提供的地理位置信息
-  // 这些信息反映的是你当前连接到Cloudflare节点的网络归属地
+  // 提取 Cloudflare 提供的地理位置信息
   const geoData = {
     city: request.cf?.city || 'N/A',
     country: request.cf?.country || 'N/A',
@@ -97,13 +67,13 @@ export async function onRequest(context) {
     colo: request.cf?.colo || 'N/A', // Cloudflare 数据中心代码
   };
 
-  // 4. 组合成最终的 JSON 对象
+  // 组合成最终的 JSON 对象
   const responsePayload = {
-    ip: clientIp,
+    ip: displayIp,
     ...geoData
   };
 
-  // 5. 以格式化的 JSON 形式返回，方便阅读
+  // 以格式化的 JSON 形式返回
   return new Response(JSON.stringify(responsePayload, null, 2), {
     headers: { ...CORS_HEADERS, 'Content-Type': 'application/json; charset=utf-8' }
   });
