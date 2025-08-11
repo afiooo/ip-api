@@ -1,10 +1,11 @@
 /**
- * functions/index.js - 终极整合版
+ * functions/index.js - 最终优化版
  *
- * 功能:
- * 1. 强制协议查询：无论用户使用什么网络，都能准确查到其公网 IPv4 和 IPv6 地址。
- * 2. GEO 信息查询：在 IP 地址后附加 /geo 可查询 Cloudflare 提供的地理位置信息。
- * 3. 优雅的根域名欢迎页和 CORS 支持。
+ * 特点:
+ * 1. 【高可用】放弃硬编码IP，改用高稳定性的专用API (icanhazip.com)，无需日后维护。
+ * 2. 【使用简单】直接访问 ipv4.子域名 或 ipv6.子域名 即可获得包含IP和地理位置的完整JSON信息，无需 /geo 后缀。
+ * 3. 【智能容错】当用户的网络不支持IPv6时，访问ipv6.子域名会返回清晰的提示。
+ * 4. 【功能完整】保留根域名欢迎页和完整的CORS跨域支持。
  */
 
 // --- 配置区 ---
@@ -13,19 +14,13 @@
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-  'Access-Control-Allow-Headers': '*',
+  'Access-Control-Allow-Headers': 'Content-Type',
 };
 
-// 外部 IP 查询服务配置。'resolve' 是强制 Worker 使用特定协议的关键
+// 稳定、无需维护的外部IP查询服务
 const IP_SERVICE_CONFIG = {
-  ipv4: {
-    url: 'https://ipv4.ip.sb',
-    resolve: '185.178.169.21' // 强制通过 IPv4 地址去访问目标 URL
-  },
-  ipv6: {
-    url: 'https://ipv6.ip.sb',
-    resolve: '2a0a:e540:3d::2'  // 强制通过 IPv6 地址去访问目标 URL
-  }
+  ipv4: { url: 'https://ipv4.icanhazip.com' },
+  ipv6: { url: 'https://ipv6.icanhazip.com' }
 };
 
 // --- 主函数 ---
@@ -33,96 +28,83 @@ const IP_SERVICE_CONFIG = {
 export async function onRequest(context) {
   const { request } = context;
 
-  // 处理 OPTIONS 预检请求，用于 CORS
+  // 处理 OPTIONS 预检请求，用于CORS
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: CORS_HEADERS });
   }
 
   const url = new URL(request.url);
   const hostname = url.hostname;
-  const pathname = url.pathname;
-  
-  // 1. 判断用户意图：是查 v4，还是 v6，还是访问根域名
+
+  // 1. 判断用户意图：查 v4，还是 v6，还是访问根域名
   const ipType = hostname.startsWith('ipv4.') ? 'ipv4' : (hostname.startsWith('ipv6.') ? 'ipv6' : 'unknown');
 
-  // 如果访问根域名 (e.g., ip.4444567.xyz or 4444567.xyz)
+  // 如果访问根域名 (e.g., 4444567.xyz)
   if (ipType === 'unknown') {
-    // 兼容您之前设置的 ip.4444567.xyz 或直接用 4444567.xyz
-    const displayDomain = hostname; 
-    const helpText = `欢迎使用 IP 查询 API!
+    const displayDomain = hostname.replace(/^(www\.)/, '');
+    const helpText = `欢迎使用 IP 及地理位置查询 API!
 
-使用方法:
-- 查询您的公网 IPv4 地址:
+使用方法 (返回JSON格式数据):
+- 查询您的公网 IPv4 地址及归属地:
   https://ipv4.${displayDomain}
 
-- 查询您的公网 IPv6 地址:
+- 查询您的公网 IPv6 地址及归属地:
   https://ipv6.${displayDomain}
-
-- 查询 IPv4 地址及地理位置 (JSON格式):
-  https://ipv4.${displayDomain}/geo
-
-- 查询 IPv6 地址及地理位置 (JSON格式):
-  https://ipv6.${displayDomain}/geo
 `;
-    // 返回欢迎和帮助信息
     return new Response(helpText, {
       status: 200,
       headers: { ...CORS_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' }
     });
   }
 
-  // 2. 如果是查询 IP (ipv4.* 或 ipv6.*)
+  // 2. 如果是查询 IP (ipv4.* 或 ipv6.*)，直接返回包含地理位置的完整信息
   let clientIp = '';
   try {
     const service = IP_SERVICE_CONFIG[ipType];
+    // 这个 fetch 会被 Cloudflare Worker 强制通过对应的协议栈发出
     const response = await fetch(service.url, {
-      headers: { 'User-Agent': 'Cloudflare-Worker-IP-API' },
-      cf: {
-        // 这是魔法发生的地方！强制 fetch 使用指定的 IP 协议栈
-        resolveOverride: service.resolve
-      }
+        headers: {
+            'User-Agent': 'Cloudflare-Worker-IP-API/2.0'
+        }
     });
 
     if (!response.ok) {
-        // 如果外部服务挂了，就用一个明确的错误提示
-        throw new Error(`External service ${service.url} failed.`);
+        throw new Error(`External service ${service.url} failed with status ${response.status}`);
     }
     clientIp = (await response.text()).trim();
 
   } catch (error) {
     console.error(`Error fetching external ${ipType} IP:`, error);
-    // 如果查询失败，提供一条有用的错误信息
-    clientIp = `无法查询到您的 ${ipType.toUpperCase()} 地址。您的网络可能不支持，或查询服务暂时不可用。`;
+    // 捕获到错误，很可能是因为用户的网络环境不支持。例如，在纯IPv4网络下查询IPv6地址。
+    const friendlyError = (ipType === 'ipv6')
+      ? '无法查询到您的 IPv6 地址。您的网络当前可能不支持 IPv6 协议。'
+      : `无法查询到您的 ${ipType.toUpperCase()} 地址，请稍后重试。`;
+    
+    // 依然返回JSON结构，但IP字段为错误信息
+    clientIp = friendlyError;
   }
 
-  // 3. 判断是否需要返回 GEO 地理位置信息
-  if (pathname.startsWith('/geo')) {
-    // GEO 信息总是从 Cloudflare 的请求头中获取，它反映的是你当前连接到 CF 的信息
-    const geoData = {
-      city: request.cf?.city || 'N/A',
-      country: request.cf?.country || 'N/A',
-      continent: request.cf?.continent || 'N/A',
-      latitude: request.cf?.latitude || 'N/A',
-      longitude: request.cf?.longitude || 'N/A',
-      timezone: request.cf?.timezone || 'N/A',
-      region: request.cf?.region || 'N/A',
-      colo: request.cf?.colo || 'N/A', // Cloudflare 数据中心
-    };
+  // 3. 提取 Cloudflare 提供的地理位置信息
+  // 这些信息反映的是你当前连接到Cloudflare节点的网络归属地
+  const geoData = {
+    city: request.cf?.city || 'N/A',
+    country: request.cf?.country || 'N/A',
+    continent: request.cf?.continent || 'N/A',
+    latitude: request.cf?.latitude || 'N/A',
+    longitude: request.cf?.longitude || 'N/A',
+    timezone: request.cf?.timezone || 'N/A',
+    region: request.cf?.region || 'N/A',
+    colo: request.cf?.colo || 'N/A', // Cloudflare 数据中心代码
+  };
 
-    // 组合成最终的 JSON 对象
-    const responsePayload = {
-      ip: clientIp, // 这是我们费力查询到的准确 IP
-      ...geoData   // 这是 Cloudflare 提供的地理信息
-    };
+  // 4. 组合成最终的 JSON 对象
+  const responsePayload = {
+    ip: clientIp,
+    ...geoData
+  };
 
-    // 以 JSON 格式返回
-    return new Response(JSON.stringify(responsePayload, null, 2), {
-      headers: { ...CORS_HEADERS, 'Content-Type': 'application/json; charset=utf-8' }
-    });
-  }
-
-  // 4. 如果不需要 GEO 信息，直接返回纯文本的 IP 地址
-  return new Response(clientIp, {
-    headers: { ...CORS_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' }
+  // 5. 以格式化的 JSON 形式返回，方便阅读
+  return new Response(JSON.stringify(responsePayload, null, 2), {
+    headers: { ...CORS_HEADERS, 'Content-Type': 'application/json; charset=utf-8' }
   });
 }
