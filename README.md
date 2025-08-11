@@ -31,8 +31,3 @@
 3.  在 `public` 文件夹内，创建一个名为 `index.html` 的文件。
 4.  将下面的 [项目代码](#-项目核心代码) 完整复制并粘贴到 `index.html` 文件中。
 
-您的项目目录结构现在应该是这样：
-
-my-ip-checker/
-└── public/
-└── index.html
