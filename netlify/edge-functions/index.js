@@ -1,92 +1,96 @@
 /**
- * src/index.js - 终极修正版 Cloudflare Worker 代码
+ * src/index.js - 诊断专用版 Cloudflare Worker
  *
- * 修复问题:
- * - 强制 Worker 使用指定的 IPv4/IPv6 出口去访问外部服务，
- *   解决 Worker 自身网络栈导致返回错误 IP 类型的问题。
- *
- * 功能说明:
- * 1. 强制分离 IPv4 / IPv6 查询:
- *    - 访问 ipv4.yourdomain.xyz -> 从外部纯IPv4服务查询并返回你的公网IPv4。
- *    - 访问 ipv6.yourdomain.xyz -> 从外部纯IPv6服务查询并返回你的公网IPv6。
- * 2. 支持 Geo 地理位置查询。
- * 3. 兼容 CORS。
- * 4. 友好提示。
+ * 目的: 彻底诊断为什么 resolveOverride 没有按预期工作。
+ * 它会返回一个详细的 JSON 对象，包含每一步的执行状态。
  */
 
-// 定义CORS头部，方便复用
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-  'Access-Control-Allow-Headers': '*',
-};
-
-// 外部服务的固定 IP 地址，这是解决问题的关键
+// 外部服务的固定 IP 地址
 const IP_SERVICE_CONFIG = {
   ipv4: {
-    url: 'https://ipv4.ip.sb',
-    resolve: '185.178.169.21' // 强制通过这个IPv4地址访问
+    url: 'https://ipv4.ip.sb/cdn-cgi/trace', // 使用 trace 页面获取更详细信息
+    resolve: '185.178.169.21'
   },
   ipv6: {
-    url: 'https://ipv6.ip.sb',
-    resolve: '2a0a:e540:3d::2' // 强制通过这个IPv6地址访问
+    url: 'https://ipv6.ip.sb/cdn-cgi/trace',
+    resolve: '2a0a:e540:3d::2'
   }
 };
 
 export default {
-  async fetch(request, env, ctx) {
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { headers: CORS_HEADERS });
-    }
-
+  async fetch(request) {
     const url = new URL(request.url);
     const hostname = url.hostname;
-    const pathname = url.pathname;
+    
+    // 初始化诊断对象
+    const debugInfo = {
+      timestamp: new Date().toISOString(),
+      request: {
+        url: request.url,
+        method: request.method,
+        headers: Object.fromEntries(request.headers),
+        cf: request.cf,
+      },
+      logic: {
+        detectedIpType: 'unknown',
+        usedServiceUrl: null,
+        usedResolveOverride: null,
+      },
+      fetchResult: {
+        status: 'not_attempted',
+        error: null,
+        responseStatus: null,
+        responseText: null,
+      },
+      finalOutput: null,
+    };
 
-    let clientIp = '';
-    const ipType = hostname.startsWith('ipv4.') ? 'ipv4' : (hostname.startsWith('ipv6.') ? 'ipv6' : 'unknown');
+    try {
+      const ipType = hostname.startsWith('ipv4.') ? 'ipv4' : (hostname.startsWith('ipv6.') ? 'ipv6' : 'unknown');
+      debugInfo.logic.detectedIpType = ipType;
 
-    if (ipType !== 'unknown') {
-      try {
+      if (ipType !== 'unknown') {
         const service = IP_SERVICE_CONFIG[ipType];
-        
-        // 使用 resolveOverride 强制 fetch 通过指定 IP 连接
-        const response = await fetch(service.url, {
-          headers: { 'User-Agent': 'Cloudflare-Worker-IP-Check' }, // 添加UA避免被拦截
-          cf: {
-            // 这是关键中的关键！
-            resolveOverride: service.resolve
-          }
-        });
+        debugInfo.logic.usedServiceUrl = service.url;
+        debugInfo.logic.usedResolveOverride = service.resolve;
 
-        if (!response.ok) throw new Error(`外部服务 ${service.url} 响应失败`);
-        clientIp = (await response.text()).trim();
+        try {
+          const response = await fetch(service.url, {
+            cf: {
+              // 关键的 resolveOverride
+              resolveOverride: service.resolve
+            }
+          });
+          
+          debugInfo.fetchResult.status = 'success';
+          debugInfo.fetchResult.responseStatus = response.status;
+          const text = await response.text();
+          debugInfo.fetchResult.responseText = text;
+          
+          // 从 trace 信息中解析 ip
+          const ipLine = text.split('\n').find(line => line.startsWith('ip='));
+          debugInfo.finalOutput = ipLine ? ipLine.split('=')[1] : "Could not parse IP from trace";
 
-      } catch (error) {
-        console.error(`获取外部 ${ipType} IP失败:`, error);
-        clientIp = request.headers.get('cf-connecting-ip') || '查询失败';
+        } catch (e) {
+          debugInfo.fetchResult.status = 'error';
+          debugInfo.fetchResult.error = e.stack;
+          debugInfo.finalOutput = "Fetch failed, see error.";
+        }
+      } else {
+        debugInfo.logic.detectedIpType = 'root_domain';
+        debugInfo.finalOutput = "This is the root domain. Please use ipv4.* or ipv6.* subdomain.";
       }
-    } else {
-      const rootDomain = hostname.replace(/^(www\.)/, '');
-      const helpText = `欢迎使用 IP 查询 API!\n\n请使用以下地址:\n- https://ipv4.${rootDomain} (获取您的 IPv4 地址)\n- https://ipv6.${rootDomain} (获取您的 IPv6 地址)\n\n查询地理位置信息:\n- https://ipv4.${rootDomain}/geo\n- https://ipv6.${rootDomain}/geo`;
-      return new Response(helpText, { status: 200, headers: { ...CORS_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' } });
+    } catch (e) {
+        debugInfo.fetchResult.status = 'catastrophic_error';
+        debugInfo.fetchResult.error = e.stack;
     }
 
-    if (pathname.startsWith('/geo')) {
-      const geoData = {
-        city: request.cf?.city,
-        country: request.cf?.country,
-        continent: request.cf?.continent,
-        regionCode: request.cf?.regionCode,
-        latitude: request.cf?.latitude,
-        longitude: request.cf?.longitude,
-        timezone: request.cf?.timezone,
-        colo: request.cf?.colo,
-      };
-      const responsePayload = { ip: clientIp, ...geoData };
-      return new Response(JSON.stringify(responsePayload, null, 2), { headers: { ...CORS_HEADERS, 'Content-Type': 'application/json; charset=utf-8' } });
-    }
-
-    return new Response(clientIp, { headers: { ...CORS_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' } });
+    // 将整个诊断对象作为 JSON 返回
+    return new Response(JSON.stringify(debugInfo, null, 2), {
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
   },
 };
