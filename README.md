@@ -1,73 +1,41 @@
-# IP-API
+# 简洁高效的公网 IP 地址查询工具 (IP Address Checker)
 
-利用 Cloudflare Workers / Vercel Edge / Netlify Edge 快速搭一个获取 IP 地址和地理位置信息的接口。
+这是一个简洁、高效、高可用的纯客户端公网 IP 地址查询页面。它专为解决在使用 WARP 等复杂网络环境时，传统服务器端查询方法不准确的问题而设计。
 
-## 使用方式
+项目完全运行在用户的浏览器中，直接利用用户的网络连接进行查询，确保结果 100% 准确地反映真实的公网 IP。
 
-### IP
+## ✨ 项目特性
 
-1. 通过访问 Cloudflare 获取本机 IP： `curl https://cloudflare-ip.html.zone/` 或者直接访问 <https://cloudflare-ip.html.zone/>
-2. 通过访问 Vercel 获取本机 IP： `curl https://vercel-ip.html.zone/` 或者直接访问 <https://vercel-ip.html.zone/>
-3. 通过访问 Netlify 获取本机 IP： `curl https://netlify-ip.html.zone/` 或者直接访问 <https://netlify-ip.html.zone/>
+- **✅ 纯粹客户端，结果精准**：直接在浏览器中发起查询，完美兼容 WARP+ 或类似网络代理环境，准确获取 IPv4 和 IPv6 地址。
+- **🚀 高可用性**：同时请求多个免费的 IP 查询服务 (`ip.sb`, `icanhazip.com` 等)，哪个先返回结果就用哪个，避免单一服务故障导致查询失败。
+- **🌐 双栈支持与地理位置**：同时显示您的 IPv4 和 IPv6 地址，并自动查询 IP 归属地信息，显示为中文。
+- **⚡ 轻量快速**：无任何框架依赖，仅使用原生 HTML/CSS/JS，页面加载极快。
+- **☁️ 免费部署**：可以一键免费部署在 Cloudflare Pages 的全球 CDN 网络上，零服务器成本。
+- **🔧 易于定制**：代码结构清晰，您可以轻松添加更多 IP 查询源或自定义归属地翻译。
 
-### IP GEO
+## 📸 效果预览
 
-1. 通过访问 Cloudflare 获取本机 IP 地理位置信息, `curl https://cloudflare-ip.html.zone/geo` 或者直接访问 <https://cloudflare-ip.html.zone/geo>
-2. 通过访问 Vercel 获取本机 IP 地理位置信息, `curl https://vercel-ip.html.zone/geo` 或者直接访问 <https://vercel-ip.html.zone/geo>
-3. 通过访问 Netlify 获取本机 IP 地理位置信息, `curl https://netlify-ip.html.zone/geo` 或者直接访问 <https://netlify-ip.html.zone/geo>
 
-> HTTP 响应头 `x-client-ip` 也是用户 IP 地址。
 
-GEO 信息格式：
+*(这是一个示例截图，您的实际界面会与此类似)*
 
-```json
-{
-    "ip": "142.171.116.110",
-    "city": "Los Angeles",
-    "country": "US",
-    "flag": "🇺🇸",
-    "countryRegion": "California",
-    "region": "LAX",
-    "latitude": "34.05440",
-    "longitude": "-118.24410",
-    "asOrganization": "Multacom Corporation"
-}
-```
+## 🛠️ 技术栈
 
-## 部署方式
+- **HTML**
+- **CSS**
+- **JavaScript (Vanilla JS, ES6+)**
+- **部署平台**: **Cloudflare Pages**
 
-### 1. 部署代码
+## 🚀 如何部署您自己的查询网站
 
-```bash
-# clone 此项目
-git clone https://github.com/ccbikai/ip-api.git
+您只需一个 GitHub 账号和一个 Cloudflare 账号，即可在 5 分钟内完成部署。
 
-# 进入项目目录
-cd ip-api
-# 安装依赖
-npm i
+### 步骤 1: 准备项目文件
 
-## 部署到 Cloudflare Workers
-npm run deploy:cloudflare
+1.  在您的电脑上，创建一个新的项目文件夹，例如 `my-ip-checker`。
+2.  进入该文件夹，在内部创建一个名为 `public` 的子文件夹。
+3.  在 `public` 文件夹内，创建一个名为 `index.html` 的文件。
+4.  将下面的 [项目代码](#-项目核心代码) 完整复制并粘贴到 `index.html` 文件中。
 
-## 部署到 Vercel Edge
-npm run deploy:vercel
+您的项目目录结构现在应该是这样：
 
-## 部署到 Netlify Edge
-npm run deploy:netlify
-```
-
-### 2. 绑定域名
-
-按照 Cloudflare/Vercel/Netlify 文档绑定域名即可。
-
-### 3. IPv4/IPv6 Only
-
-Cloudflare 支持 IPv4 和 IPv6 访问，如果想只支持单栈，可以只解析 A/AAAA 记录到 Cloudflare 的泛拨 IP。
-
-比如: <https://cloudflare-ip-v4.html.zone/> 和 <http://cloudflare-ip-v6.html.zone/>
-
-## 问题反馈
-
-1. 提 Issue / Pull Request
-2. 联系 <https://twitter.com/ccbikai>
