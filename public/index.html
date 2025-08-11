@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IP 地址查询</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #f0f2f5; color: #333; }
+        .container { background-color: white; padding: 25px 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 90%; max-width: 600px; }
+        h1 { text-align: center; color: #1a1a1a; margin-bottom: 25px; }
+        .ip-card { margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 6px; }
+        .ip-card h2 { margin: 0 0 10px; font-size: 1.2em; color: #007aff; }
+        .ip-address { font-family: "Courier New", Courier, monospace; font-weight: bold; font-size: 1.1em; word-break: break-all; }
+        .geo-info { margin-top: 8px; color: #555; }
+        .loader, .error { font-style: italic; color: #888; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>您的公网 IP 地址</h1>
+        <div class="ip-card">
+            <h2>IPv4 地址</h2>
+            <div id="ipv4-info">
+                <p class="loader">正在查询...</p>
+            </div>
+        </div>
+        <div class="ip-card">
+            <h2>IPv6 地址</h2>
+            <div id="ipv6-info">
+                <p class="loader">正在查询...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 配置区 ---
+        // 多个IPv4查询渠道，确保高可用
+        const V4_PROVIDERS = [
+            'https://api-ipv4.ip.sb/ip',
+            'https://ipv4.icanhazip.com',
+            'https://api.ipify.org'
+        ];
+        // 多个IPv6查询渠道
+        const V6_PROVIDERS = [
+            'https://api-ipv6.ip.sb/ip',
+            'https://ipv6.icanhazip.com'
+        ];
+
+        // GeoIP服务，用于查询归属地
+        const GEO_PROVIDER = (ip) => `https://api.ip.sb/geoip/${ip}`;
+
+        // --- 核心功能 ---
+
+        // 将英文国家名翻译成中文 (可按需补充)
+        function translateCountry(en) {
+            const map = { "United States": "美国", "Japan": "日本", "Singapore": "新加坡", "Hong Kong": "中国香港", "Germany": "德国", "United Kingdom": "英国", "France": "法国", "Netherlands": "荷兰", "Russia": "俄罗斯", "Canada": "加拿大", "Australia": "澳大利亚", /* ... */ };
+            return map[en] || en;
+        }
+
+        // 获取地理位置信息并格式化
+        async function getGeoInfo(ip) {
+            try {
+                const response = await fetch(GEO_PROVIDER(ip));
+                if (!response.ok) return '归属地查询失败';
+                const data = await response.json();
+                const country = translateCountry(data.country);
+                const city = data.city || '未知城市';
+                return `${country}, ${city}`;
+            } catch (error) {
+                return '归属地查询失败';
+            }
+        }
+
+        // 更新UI
+        async function updateUI(elementId, ip) {
+            const geo = await getGeoInfo(ip);
+            const element = document.getElementById(elementId);
+            element.innerHTML = `
+                <p class="ip-address">${ip}</p>
+                <p class="geo-info">${geo}</p>
+            `;
+        }
+        
+        // 显示错误信息
+        function showError(elementId, message) {
+            document.getElementById(elementId).innerHTML = `<p class="error">${message}</p>`;
+        }
+
+        // 使用 Promise.any 来从多个源获取IP，哪个快用哪个
+        async function fetchIP(providers, type) {
+            const promises = providers.map(url => 
+                fetch(url, { signal: AbortSignal.timeout(3000) }).then(res => {
+                    if (!res.ok) throw new Error('Response not OK');
+                    return res.text();
+                }).then(text => text.trim())
+            );
+            try {
+                const ip = await Promise.any(promises);
+                updateUI(`${type}-info`, ip);
+            } catch (e) {
+                showError(`${type}-info`, `无法获取 ${type.toUpperCase()} 地址，您的网络可能不支持或所有查询源暂时不可用。`);
+            }
+        }
+        
+        // --- 启动查询 ---
+        fetchIP(V4_PROVIDERS, 'ipv4');
+        fetchIP(V6_PROVIDERS, 'ipv6');
+    </script>
+</body>
+</html>
