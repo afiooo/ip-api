@@ -5,59 +5,215 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IP 地址查询</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #f0f2f5; color: #333; }
-        .container { background-color: white; padding: 25px 40px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 90%; max-width: 600px; }
-        h1 { text-align: center; color: #1a1a1a; margin-bottom: 25px; }
-        .ip-card { margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 6px; }
-        .ip-card h2 { margin: 0 0 10px; font-size: 1.2em; color: #007aff; }
-        .ip-address { font-family: "Courier New", Courier, monospace; font-weight: bold; font-size: 1.1em; word-break: break-all; }
-        .geo-info { margin-top: 8px; color: #555; }
-        .loader, .error { font-style: italic; color: #888; }
+        /* --- CSS变量定义 --- */
+        :root {
+            --bg-color: #f4f7f9;
+            --card-bg-color: #ffffff;
+            --text-color: #333333;
+            --heading-color: #1a1a1a;
+            --accent-color: #007aff;
+            --border-color: #e0e6ec;
+            --shadow-color: rgba(0, 0, 0, 0.08);
+            --loader-color: #999999;
+            --error-color: #dc3545;
+            --switch-bg: #ccc;
+            --switch-knob: white;
+            --transition-speed: 0.3s;
+        }
+
+        /* --- 黑暗模式变量 --- */
+        html.dark {
+            --bg-color: #121212;
+            --card-bg-color: #1e1e1e;
+            --text-color: #e0e0e0;
+            --heading-color: #ffffff;
+            --border-color: #333333;
+            --shadow-color: rgba(0, 0, 0, 0.2);
+            --loader-color: #777777;
+            --switch-bg: #444;
+        }
+        
+        /* --- 基础样式 --- */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px 10px;
+            box-sizing: border-box;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color var(--transition-speed), color var(--transition-speed);
+        }
+        
+        /* --- 主容器 --- */
+        .container {
+            background-color: var(--card-bg-color);
+            padding: 30px 40px;
+            border-radius: 12px;
+            box-shadow: 0 8px 30px var(--shadow-color);
+            width: 100%;
+            max-width: 600px;
+            transition: background-color var(--transition-speed);
+            position: relative; /* 为了主题切换按钮定位 */
+        }
+        
+        h1 {
+            text-align: center;
+            color: var(--heading-color);
+            margin-top: 0;
+            margin-bottom: 30px;
+            font-weight: 600;
+        }
+
+        /* --- IP信息卡片 --- */
+        .ip-card {
+            margin-bottom: 20px;
+            padding: 20px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            transition: border-color var(--transition-speed);
+        }
+        .ip-card:last-child {
+            margin-bottom: 0;
+        }
+        
+        .ip-card h2 {
+            margin: 0 0 12px;
+            font-size: 1.1em;
+            color: var(--accent-color);
+            font-weight: 500;
+        }
+        
+        .ip-address {
+            font-family: "SF Mono", "Fira Code", "Consolas", "Courier New", monospace;
+            font-weight: bold;
+            font-size: 1.25em;
+            word-break: break-all;
+            margin: 0;
+        }
+        
+        .geo-info {
+            margin-top: 8px;
+            color: var(--text-color);
+            opacity: 0.8;
+            margin-bottom: 0;
+        }
+
+        /* --- 加载与错误状态 --- */
+        .loader, .error {
+            font-style: italic;
+            color: var(--loader-color);
+        }
+        .error {
+            color: var(--error-color);
+            font-weight: 500;
+        }
+        /* 加载动画 */
+        .loader::after {
+            content: '...';
+            display: inline-block;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        /* --- 黑暗模式切换开关 --- */
+        .theme-switch-wrapper {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            align-items: center;
+        }
+        .theme-switch {
+            display: inline-block;
+            height: 24px;
+            position: relative;
+            width: 44px;
+        }
+        .theme-switch input {
+            display: none;
+        }
+        .slider {
+            background-color: var(--switch-bg);
+            bottom: 0;
+            cursor: pointer;
+            left: 0;
+            position: absolute;
+            right: 0;
+            top: 0;
+            transition: var(--transition-speed);
+            border-radius: 34px;
+        }
+        .slider:before {
+            background-color: var(--switch-knob);
+            bottom: 3px;
+            content: "";
+            height: 18px;
+            left: 3px;
+            position: absolute;
+            transition: var(--transition-speed);
+            width: 18px;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: var(--accent-color);
+        }
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
     </style>
 </head>
 <body>
     <div class="container">
+        <!-- 新增: 主题切换开关 -->
+        <div class="theme-switch-wrapper">
+            <label class="theme-switch" for="theme-toggle">
+                <input type="checkbox" id="theme-toggle" />
+                <span class="slider"></span>
+            </label>
+        </div>
+
         <h1>您的公网 IP 地址</h1>
         <div class="ip-card">
             <h2>IPv4 地址</h2>
             <div id="ipv4-info">
-                <p class="loader">正在查询...</p>
+                <p class="loader">正在查询</p>
             </div>
         </div>
         <div class="ip-card">
             <h2>IPv6 地址</h2>
             <div id="ipv6-info">
-                <p class="loader">正在查询...</p>
+                <p class="loader">正在查询</p>
             </div>
         </div>
     </div>
 
     <script>
-        // --- 配置区 ---
-        // 多个IPv4查询渠道，确保高可用
+        // --- 配置区 (未改动) ---
         const V4_PROVIDERS = [
             'https://api-ipv4.ip.sb/ip',
             'https://ipv4.icanhazip.com',
             'https://api.ipify.org'
         ];
-        // 多个IPv6查询渠道
         const V6_PROVIDERS = [
             'https://api-ipv6.ip.sb/ip',
             'https://ipv6.icanhazip.com'
         ];
-
-        // GeoIP服务，用于查询归属地
         const GEO_PROVIDER = (ip) => `https://api.ip.sb/geoip/${ip}`;
 
-        // --- 核心功能 ---
-
-        // 将英文国家名翻译成中文 (可按需补充)
+        // --- 核心功能 (未改动) ---
         function translateCountry(en) {
             const map = { "United States": "美国", "Japan": "日本", "Singapore": "新加坡", "Hong Kong": "中国香港", "Germany": "德国", "United Kingdom": "英国", "France": "法国", "Netherlands": "荷兰", "Russia": "俄罗斯", "Canada": "加拿大", "Australia": "澳大利亚", /* ... */ };
             return map[en] || en;
         }
 
-        // 获取地理位置信息并格式化
         async function getGeoInfo(ip) {
             try {
                 const response = await fetch(GEO_PROVIDER(ip));
@@ -65,13 +221,13 @@
                 const data = await response.json();
                 const country = translateCountry(data.country);
                 const city = data.city || '未知城市';
-                return `${country}, ${city}`;
+                const isp = data.isp || '';
+                return `${country}, ${city} <br> ${isp}`.trim();
             } catch (error) {
                 return '归属地查询失败';
             }
         }
 
-        // 更新UI
         async function updateUI(elementId, ip) {
             const geo = await getGeoInfo(ip);
             const element = document.getElementById(elementId);
@@ -81,12 +237,10 @@
             `;
         }
         
-        // 显示错误信息
         function showError(elementId, message) {
             document.getElementById(elementId).innerHTML = `<p class="error">${message}</p>`;
         }
-
-        // 使用 Promise.any 来从多个源获取IP，哪个快用哪个
+        
         async function fetchIP(providers, type) {
             const promises = providers.map(url => 
                 fetch(url, { signal: AbortSignal.timeout(3000) }).then(res => {
@@ -101,8 +255,51 @@
                 showError(`${type}-info`, `无法获取 ${type.toUpperCase()} 地址，您的网络可能不支持或所有查询源暂时不可用。`);
             }
         }
+
+        // --- [新增] 主题切换功能 ---
+        const themeToggle = document.getElementById('theme-toggle');
+        const docHtml = document.documentElement;
         
-        // --- 启动查询 ---
+        // 检查系统主题偏好
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
+
+        // 应用主题的函数
+        const applyTheme = (theme) => {
+            if (theme === 'dark') {
+                docHtml.classList.add('dark');
+                themeToggle.checked = true;
+            } else {
+                docHtml.classList.remove('dark');
+                themeToggle.checked = false;
+            }
+        };
+
+        // 页面加载时：
+        // 1. 检查 localStorage 中是否有用户保存的设置
+        // 2. 如果没有，则跟随系统设置
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme) {
+            applyTheme(savedTheme);
+        } else {
+            applyTheme(prefersDark.matches ? 'dark' : 'light');
+        }
+
+        // 监听手动切换事件
+        themeToggle.addEventListener('change', (e) => {
+            const newTheme = e.target.checked ? 'dark' : 'light';
+            applyTheme(newTheme);
+            localStorage.setItem('theme', newTheme); // 保存用户选择
+        });
+
+        // 监听系统主题变化事件
+        prefersDark.addEventListener('change', (e) => {
+            // 只有当用户没有手动设置过主题时，才跟随系统变化
+            if (!localStorage.getItem('theme')) {
+                applyTheme(e.matches ? 'dark' : 'light');
+            }
+        });
+
+        // --- 启动查询 (未改动) ---
         fetchIP(V4_PROVIDERS, 'ipv4');
         fetchIP(V6_PROVIDERS, 'ipv6');
     </script>
